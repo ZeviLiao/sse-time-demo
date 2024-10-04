@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// 用于存储连接的客户端
+const clients: { controller: ReadableStreamDefaultController<string> }[] = [];
+
+// 处理 GET 请求，返回一个 SSE 流
 export async function GET(req: NextRequest) {
-  // 创建一个可读流
   const stream = new ReadableStream({
     start(controller) {
-      // 每秒发送一次当前时间
-      const intervalId = setInterval(() => {
-        const currentTime = new Date().toLocaleTimeString();
-        const data = `data: ${currentTime}\n\n`; // SSE 数据格式
-        controller.enqueue(new TextEncoder().encode(data)); // 推送数据
-      }, 1000);
+      // 添加当前控制器到 clients 列表
+      clients.push({ controller });
 
       // 监听请求的关闭信号
       req.signal.addEventListener('abort', () => {
-        clearInterval(intervalId); // 清理定时器
+        const index = clients.findIndex(client => client.controller === controller);
+        if (index !== -1) {
+          clients.splice(index, 1); // 从 clients 中移除
+        }
         controller.close(); // 关闭流
       });
     },
@@ -27,4 +29,16 @@ export async function GET(req: NextRequest) {
       'Connection': 'keep-alive',
     },
   });
+}
+
+// 处理 POST 请求，发送消息给所有连接的客户端
+export async function POST(req: NextRequest) {
+  const { message } = await req.json(); // 解析 JSON 消息
+
+  // 遍历所有连接的客户端并发送消息
+  for (const { controller } of clients) {
+    controller.enqueue(`data: ${new Date().toLocaleTimeString() + ":" + message}\n\n`); // 正确格式化消息
+  }
+
+  return NextResponse.json({ success: true });
 }
